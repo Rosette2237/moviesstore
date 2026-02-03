@@ -1,5 +1,6 @@
 from django.shortcuts import render, redirect, get_object_or_404
-from .models import Movie, Review
+from django.contrib import messages
+from .models import Movie, Review, ReviewReport
 from django.contrib.auth.decorators import login_required
 
 def index(request):
@@ -16,7 +17,7 @@ def index(request):
 
 def show(request, id):
     movie = Movie.objects.get(id=id)
-    reviews = Review.objects.filter(movie=movie)
+    reviews = Review.objects.filter(movie=movie, is_hidden=False).order_by('-date')
     template_data = {}
     template_data['title'] = movie.name
     template_data['movie'] = movie
@@ -61,8 +62,34 @@ def delete_review(request, id, review_id):
     review.delete()
     return redirect('movies.show', id=id)
 
+
+
 @login_required
 def report_review(request, id, review_id):
-    review = get_object_or_404(Review, id=review_id)
-    review.delete()
+    if request.method != 'POST':
+        return redirect('movies.show', id=id)
+
+    movie = get_object_or_404(Movie, id=id)
+    review = get_object_or_404(Review, id=review_id, movie=movie)
+
+    # Optional: prevent self-reporting
+    if review.user_id == request.user.id:
+        messages.warning(request, "You cannot report your own review.")
+        return redirect('movies.show', id=id)
+
+    reason = request.POST.get('reason', '').strip()
+
+    report, created = ReviewReport.objects.get_or_create(
+        review=review,
+        user=request.user,
+        defaults={'reason': reason}
+    )
+
+    if created:
+        review.is_hidden = True
+        review.save(update_fields=['is_hidden'])
+        messages.success(request, "Thanks—this review has been reported and is now hidden.")
+    else:
+        messages.info(request, "You already reported this review.")
+
     return redirect('movies.show', id=id)
